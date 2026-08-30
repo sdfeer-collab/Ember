@@ -1,0 +1,58 @@
+Project Basilisk 构建与运行手册
+四层语言塔：汇编种子 (Seed) -> 种子编译器 (basilisk-seed) -> 自举编译器 (emberc) -> 解释器/程序 (bf/fib)
+环境要求：macOS (Apple Silicon)，已安装 Xcode Command Line Tools（提供 as 和 ld）
+
+0. 初始准备（非常重要！）
+切记：不要直接从浏览器或聊天框复制粘贴代码到终端里！
+终端会将 # 当作注释导致命令中断，还会引入不可见的 BOM 和 CRLF 换行符，让汇编器当场崩溃。
+正确做法：使用 VS Code 新建文件，粘贴代码，将右下角编码改为 UTF-8，换行符改为 LF，保存。
+如果已经有了带格式的文件，先在终端里清洗一下：
+perl -pi -e 's/^\xEF\xBB\xBF//; s/\r//g' emberc.em bf.em fib.em
+
+1. 构建种子编译器 (Seed Compiler)
+种子编译器会将 input.em 读入内存，并在 当前目录直接生成 output.s。
+chmod +x build.sh
+./build.sh
+⚠️ 终极避坑指南：种子编译器会自己写文件，它会打印 basilisk-seed: wrote output.s。千万千万不要写成 ./build/basilisk-seed > emberc_output.s！这会把你唯一的一行提示语重定向进文件，导致汇编器报“unexpected token”。
+
+2. 构建自举编译器 (emberc)
+cp emberc.em input.em
+./build/basilisk-seed
+as -arch arm64 -o emberc.o output.s
+ld -arch arm64 -syslibroot $(xcrun --show-sdk-path) -e _main -o emberc emberc.o $(cat build/hf_objs.txt) -lSystem
+
+（补充：如果 build/ 下没有 hf_objs.txt，手动编译 HeapForge 再链接）
+as -arch arm64 -o build/hf_platform.o    heapforge/src/platform.s
+as -arch arm64 -o build/hf_stack_alloc.o heapforge/src/stack_alloc.s
+as -arch arm64 -o build/hf_block_pool.o  heapforge/src/block_pool.s
+as -arch arm64 -o build/hf_free_list.o   heapforge/src/free_list.s
+ld -arch arm64 -syslibroot $(xcrun --show-sdk-path) -e _main -o emberc emberc.o build/hf_platform.o build/hf_stack_alloc.o build/hf_block_pool.o build/hf_free_list.o -lSystem
+
+3. 构建并运行 BF 解释器与示例
+BF 通过命令行参数接收 .bf 文件名（argv 原生 i64，经 load64 直读，无截断）：
+cp bf.em input.em
+./build/emberc > output.s
+as -arch arm64 -o bf.o output.s
+ld -arch arm64 -syslibroot $(xcrun --show-sdk-path) -e _main -o build/bf bf.o $(cat build/hf_objs.txt) -lSystem
+
+运行：
+./build/bf examples/exit42.bf
+echo "Exit code: $?"   # 应输出 42
+./build/bf examples/hello.bf   # 输出 Hello World!
+
+4. 编译运行纯 Ember 写的斐波那契（无堆依赖）
+cp fib.em input.em
+./build/emberc > output.s
+as -arch arm64 -o fib.o output.s
+ld -arch arm64 -syslibroot $(xcrun --show-sdk-path) -e _main -o fib fib.o -lSystem
+./fib                   # 输出 0 1 1 2 3 5 8 13 21 34
+
+5. 终极故障排除 (Troubleshooting)
+zsh: command not found: # -> 不要直接粘贴多行注释到终端！
+cat: illegal option -- A -> macOS 不支持，请使用 cat -e 或 xxd 检查
+unexpected token in argument list -> 混入了 CRLF 或 BOM，用 perl 清洗
+Undefined symbols: _hf_asm_pool_* -> 链接时漏了 HeapForge，必须加 $(cat build/hf_objs.txt)
+emberc_output.s 只有一个提示语 -> 错误使用了重定向，不要用 > 重定向它
+cd 进文件夹提示找不到 -> 路径带空格，用引号包住：cd "/Users/xienan/Documents/xcode/w x"
+
+建议：如果以后频繁更新代码，把上面第2、3步写进一个 test.sh 自动化脚本里，这样就不会再踩坑了。
