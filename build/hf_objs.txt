@@ -1,0 +1,1 @@
+build/hf_platform.o build/hf_stack_alloc.o build/hf_block_pool.o build/hf_free_list.o

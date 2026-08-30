@@ -1,0 +1,2 @@
+fn make() -> i32 { let x: i32 = gc_alloc(64); return x; }
+fn main() -> i32 { let y: i32 = make(); gc_collect(); if gc_live() == 1 { y = 0; gc_collect(); return gc_live(); } return 9; }
